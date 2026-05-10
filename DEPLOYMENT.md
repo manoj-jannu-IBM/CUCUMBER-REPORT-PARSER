@@ -42,7 +42,7 @@ createdb test_analytics
 
 4. **Generate Sample Data (Optional)**
 ```bash
-node server/scripts/sampleData.js
+v
 ```
 
 5. **Run Application**
