@@ -246,6 +246,11 @@ const Heatmap = () => {
                             <Typography variant="body2">
                               <strong>Executions:</strong> {data.total_executions}
                             </Typography>
+                            {data.triggered_by_list && (
+                              <Typography variant="body2">
+                                <strong>Triggered By:</strong> {data.triggered_by_list}
+                              </Typography>
+                            )}
                           </Box>
                         }
                       >

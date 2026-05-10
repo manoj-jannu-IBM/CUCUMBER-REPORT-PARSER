@@ -33,10 +33,12 @@ app.post('/api/executions', async (req, res) => {
   try {
     const {
       buildNumber,
+      cycleName,
       buildUrl,
       environment,
       gitCommit,
       gitBranch,
+      triggeredBy,
       cucumberReport,
       metadata,
     } = req.body;
@@ -44,31 +46,87 @@ app.post('/api/executions', async (req, res) => {
     // Parse Cucumber report
     const stats = parseCucumberReport(cucumberReport);
 
-    // Insert execution
-    const executionResult = await db.query(
-      `INSERT INTO test_executions 
-       (build_number, build_url, environment, git_commit, git_branch, 
-        total_scenarios, passed_scenarios, failed_scenarios, skipped_scenarios, 
-        total_duration, status, metadata)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-       RETURNING *`,
-      [
-        buildNumber,
-        buildUrl,
-        environment,
-        gitCommit,
-        gitBranch,
-        stats.totalScenarios,
-        stats.passedScenarios,
-        stats.failedScenarios,
-        stats.skippedScenarios,
-        stats.totalDuration,
-        stats.status,
-        JSON.stringify(metadata || {}),
-      ]
-    );
+    let execution;
+    let isNewExecution = true;
 
-    const execution = executionResult.rows[0];
+    // Check if execution with same cycle_name and environment exists
+    if (cycleName) {
+      const existingResult = await db.query(
+        'SELECT * FROM test_executions WHERE cycle_name = $1 AND environment = $2',
+        [cycleName, environment]
+      );
+
+      if (existingResult.rows.length > 0) {
+        // Merge with existing execution
+        execution = existingResult.rows[0];
+        isNewExecution = false;
+        
+        console.log(`Merging report into existing cycle: ${cycleName} (${environment})`);
+        
+        // Update execution with merged stats
+        const updatedResult = await db.query(
+          `UPDATE test_executions
+           SET total_scenarios = total_scenarios + $1,
+               passed_scenarios = passed_scenarios + $2,
+               failed_scenarios = failed_scenarios + $3,
+               skipped_scenarios = skipped_scenarios + $4,
+               total_duration = total_duration + $5,
+               status = CASE WHEN (failed_scenarios + $3) > 0 THEN 'failed' ELSE 'passed' END,
+               build_url = COALESCE($6, build_url),
+               git_commit = COALESCE($7, git_commit),
+               git_branch = COALESCE($8, git_branch),
+               triggered_by = COALESCE($9, triggered_by),
+               metadata = COALESCE($10, metadata)
+           WHERE id = $11
+           RETURNING *`,
+          [
+            stats.totalScenarios,
+            stats.passedScenarios,
+            stats.failedScenarios,
+            stats.skippedScenarios,
+            stats.totalDuration,
+            buildUrl,
+            gitCommit,
+            gitBranch,
+            triggeredBy,
+            metadata ? JSON.stringify(metadata) : null,
+            execution.id
+          ]
+        );
+        
+        execution = updatedResult.rows[0];
+      }
+    }
+
+    // Create new execution if no existing cycle found
+    if (isNewExecution) {
+      const executionResult = await db.query(
+        `INSERT INTO test_executions
+         (build_number, cycle_name, build_url, environment, git_commit, git_branch, triggered_by,
+          total_scenarios, passed_scenarios, failed_scenarios, skipped_scenarios,
+          total_duration, status, metadata)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+         RETURNING *`,
+        [
+          buildNumber,
+          cycleName || null,
+          buildUrl,
+          environment,
+          gitCommit,
+          gitBranch,
+          triggeredBy,
+          stats.totalScenarios,
+          stats.passedScenarios,
+          stats.failedScenarios,
+          stats.skippedScenarios,
+          stats.totalDuration,
+          stats.status,
+          JSON.stringify(metadata || {}),
+        ]
+      );
+
+      execution = executionResult.rows[0];
+    }
 
     // Process features and scenarios
     await processFeatures(execution.id, cucumberReport);
@@ -83,7 +141,10 @@ app.post('/api/executions', async (req, res) => {
     res.status(201).json({
       success: true,
       execution,
-      message: 'Test execution created successfully',
+      message: isNewExecution
+        ? 'Test execution created successfully'
+        : `Test execution merged into cycle: ${cycleName}`,
+      merged: !isNewExecution,
     });
   } catch (error) {
     console.error('Error creating execution:', error);
@@ -96,7 +157,7 @@ app.post('/api/executions', async (req, res) => {
  */
 app.get('/api/executions', async (req, res) => {
   try {
-    const { environment, startDate, endDate, limit = 50, offset = 0 } = req.query;
+    const { environment, startDate, endDate, cycleName, limit = 50, offset = 0 } = req.query;
 
     let query = 'SELECT * FROM test_executions WHERE 1=1';
     const params = [];
@@ -117,6 +178,12 @@ app.get('/api/executions', async (req, res) => {
     if (endDate) {
       query += ` AND execution_date <= $${paramIndex}`;
       params.push(endDate);
+      paramIndex++;
+    }
+
+    if (cycleName) {
+      query += ` AND cycle_name ILIKE $${paramIndex}`;
+      params.push(`%${cycleName}%`);
       paramIndex++;
     }
 
@@ -153,14 +220,28 @@ app.get('/api/executions/:id', async (req, res) => {
     }
 
     const featuresResult = await db.query(
-      'SELECT * FROM features WHERE execution_id = $1',
+      'SELECT * FROM features WHERE execution_id = $1 ORDER BY id',
       [id]
+    );
+
+    // Get scenarios for each feature
+    const featuresWithScenarios = await Promise.all(
+      featuresResult.rows.map(async (feature) => {
+        const scenariosResult = await db.query(
+          'SELECT * FROM scenarios WHERE feature_id = $1 ORDER BY id',
+          [feature.id]
+        );
+        return {
+          ...feature,
+          scenarios: scenariosResult.rows,
+        };
+      })
     );
 
     res.json({
       success: true,
       execution: executionResult.rows[0],
-      features: featuresResult.rows,
+      features: featuresWithScenarios,
     });
   } catch (error) {
     console.error('Error fetching execution:', error);
@@ -178,14 +259,15 @@ app.get('/api/heatmap', async (req, res) => {
     const { days = 30, environment } = req.query;
 
     let query = `
-      SELECT 
+      SELECT
         DATE(execution_date) as date,
         environment,
         COUNT(*) as total_executions,
         SUM(passed_scenarios) as total_passed,
         SUM(failed_scenarios) as total_failed,
         SUM(skipped_scenarios) as total_skipped,
-        ROUND(AVG(passed_scenarios::decimal / NULLIF(total_scenarios, 0) * 100), 2) as pass_rate
+        ROUND(AVG(passed_scenarios::decimal / NULLIF(total_scenarios, 0) * 100), 2) as pass_rate,
+        STRING_AGG(DISTINCT triggered_by, ', ') as triggered_by_list
       FROM test_executions
       WHERE execution_date >= NOW() - INTERVAL '${parseInt(days)} days'
     `;
@@ -297,6 +379,69 @@ app.get('/api/analytics/top-failures', async (req, res) => {
   }
 });
 
+/**
+ * GET /api/scenarios/failure-frequency - Get failure frequency for a scenario
+ */
+app.get('/api/scenarios/failure-frequency', async (req, res) => {
+  try {
+    const { scenarioName } = req.query;
+
+    if (!scenarioName) {
+      return res.status(400).json({ success: false, error: 'scenarioName is required' });
+    }
+
+    // Get failure statistics for this scenario across all executions
+    const result = await db.query(
+      `SELECT
+        COUNT(*) as total_executions,
+        SUM(CASE WHEN s.status = 'failed' THEN 1 ELSE 0 END) as failed_count,
+        SUM(CASE WHEN s.status = 'passed' THEN 1 ELSE 0 END) as passed_count,
+        SUM(CASE WHEN s.status = 'skipped' THEN 1 ELSE 0 END) as skipped_count,
+        MAX(CASE WHEN s.status = 'failed' THEN te.execution_date END) as last_failed,
+        MIN(CASE WHEN s.status = 'failed' THEN te.execution_date END) as first_failed,
+        MAX(CASE WHEN s.status = 'passed' THEN te.execution_date END) as last_passed
+       FROM scenarios s
+       JOIN features f ON s.feature_id = f.id
+       JOIN test_executions te ON f.execution_id = te.id
+       WHERE s.scenario_name = $1
+       AND te.execution_date >= NOW() - INTERVAL '90 days'`,
+      [scenarioName]
+    );
+
+    if (result.rows.length === 0 || result.rows[0].total_executions === 0) {
+      return res.json({
+        success: true,
+        total_executions: 0,
+        failed_count: 0,
+        passed_count: 0,
+        skipped_count: 0,
+        failure_rate: 0,
+        last_failed: null,
+        first_failed: null,
+        last_passed: null
+      });
+    }
+
+    const stats = result.rows[0];
+    const failureRate = parseInt(stats.failed_count) / parseInt(stats.total_executions);
+
+    res.json({
+      success: true,
+      total_executions: parseInt(stats.total_executions),
+      failed_count: parseInt(stats.failed_count),
+      passed_count: parseInt(stats.passed_count),
+      skipped_count: parseInt(stats.skipped_count),
+      failure_rate: failureRate,
+      last_failed: stats.last_failed,
+      first_failed: stats.first_failed,
+      last_passed: stats.last_passed
+    });
+  } catch (error) {
+    console.error('Error fetching failure frequency:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // ==================== AI ANALYSIS ENDPOINTS ====================
 
 /**
@@ -305,6 +450,7 @@ app.get('/api/analytics/top-failures', async (req, res) => {
 app.get('/api/analysis/:scenarioId', async (req, res) => {
   try {
     const { scenarioId } = req.params;
+    console.log('Fetching AI analysis for scenario:', scenarioId);
 
     const result = await db.query(
       'SELECT * FROM failure_analysis WHERE scenario_id = $1',
@@ -312,17 +458,21 @@ app.get('/api/analysis/:scenarioId', async (req, res) => {
     );
 
     if (result.rows.length === 0) {
+      console.log('No existing analysis found, triggering new analysis...');
       // Trigger analysis if not exists
       const analysis = await aiAnalysisService.analyzeFailure(scenarioId);
+      console.log('Analysis completed:', analysis);
       return res.json({ success: true, analysis });
     }
 
+    console.log('Returning existing analysis');
     res.json({
       success: true,
       analysis: result.rows[0],
     });
   } catch (error) {
-    console.error('Error fetching analysis:', error);
+    console.error('Error fetching analysis:', error.message);
+    console.error('Error stack:', error.stack);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -346,6 +496,51 @@ app.post('/api/analysis/:scenarioId/reanalyze', async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 });
+// ==================== EXTERNAL API ENDPOINTS ====================
+
+/**
+ * GET /api/external/test-cycles - Proxy endpoint for external test cycles API
+ */
+app.get('/api/external/test-cycles', async (req, res) => {
+  try {
+    // Replace with your actual external API URL
+    const externalApiUrl = process.env.EXTERNAL_API_URL || 'https://your-external-api.com/api/test-cycles';
+    
+    // You can add authentication headers if needed
+    const headers = {};
+    if (process.env.EXTERNAL_API_KEY) {
+      headers['Authorization'] = `Bearer ${process.env.EXTERNAL_API_KEY}`;
+    }
+    
+    // Make request to external API
+    const axios = require('axios');
+    const response = await axios.get(externalApiUrl, { headers });
+    
+    // Return the data
+    res.json(response.data);
+  } catch (error) {
+    console.error('Error fetching external test cycles:', error.message);
+    
+    // For development/testing, return mock data if external API fails
+    if (process.env.NODE_ENV === 'development') {
+      console.log('Returning mock data for development');
+      res.json({
+        status: 'SUCCESS',
+        message: 'Mock data for development',
+        getMyCloudTaskOutput: {
+          results: []
+        }
+      });
+    } else {
+      res.status(500).json({ 
+        success: false, 
+        error: 'Failed to fetch test cycles from external API',
+        details: error.message 
+      });
+    }
+  }
+});
+
 
 // ==================== JIRA ENDPOINTS ====================
 
@@ -368,22 +563,13 @@ app.post('/api/jira/sync', async (req, res) => {
 
 /**
  * POST /api/jira/create-defect - Create Jira defect from failure
+ * DISABLED: Read-only mode - ticket creation not allowed
  */
 app.post('/api/jira/create-defect', async (req, res) => {
-  try {
-    const { scenarioId } = req.body;
-
-    const ticket = await jiraService.createDefectFromFailure(scenarioId);
-
-    res.json({
-      success: true,
-      ticket,
-      message: 'Jira defect created successfully',
-    });
-  } catch (error) {
-    console.error('Error creating Jira defect:', error);
-    res.status(500).json({ success: false, error: error.message });
-  }
+  res.status(403).json({
+    success: false,
+    error: 'Jira ticket creation is disabled. System is in read-only mode.'
+  });
 });
 
 // ==================== HELPER FUNCTIONS ====================

@@ -1,9 +1,31 @@
-const OpenAI = require('openai');
+const axios = require('axios');
 const db = require('../config/database');
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+// Ollama configuration
+const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'llama3.2';
+
+// Test Ollama connection on startup
+(async () => {
+  try {
+    console.log('Testing Ollama connection...');
+    console.log('Ollama URL:', OLLAMA_BASE_URL);
+    console.log('Ollama Model:', OLLAMA_MODEL);
+    
+    const response = await axios.post(`${OLLAMA_BASE_URL}/api/chat`, {
+      model: OLLAMA_MODEL,
+      messages: [{ role: 'user', content: 'Hello' }],
+      stream: false,
+    });
+    console.log('✓ Ollama connection successful!');
+  } catch (error) {
+    console.error('✗ Ollama connection failed:', error.message);
+    console.error('Please ensure:');
+    console.error('1. Ollama is running');
+    console.error('2. Model is downloaded: ollama pull', OLLAMA_MODEL);
+    console.error('3. OLLAMA_BASE_URL is correct:', OLLAMA_BASE_URL);
+  }
+})();
 
 class AIAnalysisService {
   /**
@@ -207,37 +229,64 @@ class AIAnalysisService {
   }
 
   /**
-   * Generate AI-powered analysis using OpenAI
+   * Generate AI-powered analysis using Ollama (Local LLM)
    */
   async generateAIAnalysis(scenario, similarFailures, relatedJiraTickets, flakyAnalysis) {
     try {
       const prompt = this.buildAnalysisPrompt(scenario, similarFailures, relatedJiraTickets, flakyAnalysis);
 
-      const completion = await openai.chat.completions.create({
-        model: process.env.OPENAI_MODEL || 'gpt-4',
-        messages: [
-          {
-            role: 'system',
-            content: `You are an expert QA engineer and test failure analyst. Analyze test failures and provide:
+      const systemPrompt = `You are an expert QA engineer and test failure analyst. Analyze test failures and provide:
 1. Failure type classification (Infrastructure, Application Bug, Data Issue, Environment, Flaky Test, etc.)
 2. Probable root cause
 3. Confidence score (0.0 to 1.0)
 4. Brief summary
 5. Suggested owner/team
 
-Respond in JSON format with keys: failureType, rootCause, confidenceScore, summary, suggestedOwner`
+Respond ONLY with valid JSON format with keys: failureType, rootCause, confidenceScore, summary, suggestedOwner`;
+
+      const response = await axios.post(`${OLLAMA_BASE_URL}/api/chat`, {
+        model: OLLAMA_MODEL,
+        messages: [
+          {
+            role: 'system',
+            content: systemPrompt,
           },
           {
             role: 'user',
-            content: prompt
-          }
+            content: prompt,
+          },
         ],
-        temperature: 0.3,
-        max_tokens: 1000,
+        stream: false,
+        options: {
+          temperature: 0.3,
+          num_predict: 1000,
+        },
       });
 
-      const response = completion.choices[0].message.content;
-      const analysis = JSON.parse(response);
+      const generatedText = response.data.message.content;
+      
+      // Try to parse JSON from the response
+      let analysis;
+      try {
+        // Look for JSON in the response
+        const jsonMatch = generatedText.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          analysis = JSON.parse(jsonMatch[0]);
+        } else {
+          throw new Error('No JSON found in response');
+        }
+      } catch (parseError) {
+        console.error('Error parsing Ollama response:', parseError);
+        console.log('Raw response:', generatedText);
+        // Return default analysis if parsing fails
+        analysis = {
+          failureType: 'Unknown',
+          rootCause: 'Unable to parse AI response',
+          confidenceScore: 0.5,
+          summary: generatedText.substring(0, 500),
+          suggestedOwner: 'Unassigned',
+        };
+      }
 
       return {
         failureType: analysis.failureType || 'Unknown',
@@ -247,13 +296,22 @@ Respond in JSON format with keys: failureType, rootCause, confidenceScore, summa
         suggestedOwner: analysis.suggestedOwner || 'Unassigned',
       };
     } catch (error) {
-      console.error('Error generating AI analysis:', error);
+      console.error('Error generating AI analysis:', error.message);
+      console.error('Error details:', {
+        name: error.name,
+        code: error.code,
+        cause: error.cause,
+        stack: error.stack?.split('\n').slice(0, 3).join('\n')
+      });
+      console.error('Ollama URL:', OLLAMA_BASE_URL);
+      console.error('Ollama Model:', OLLAMA_MODEL);
+      
       // Return default analysis if AI fails
       return {
         failureType: 'Unknown',
-        rootCause: 'AI analysis unavailable',
+        rootCause: `AI analysis unavailable - ${error.message}`,
         confidenceScore: 0.0,
-        summary: 'Unable to generate AI analysis',
+        summary: 'Unable to generate AI analysis. Please check if Ollama is running on ' + OLLAMA_BASE_URL,
         suggestedOwner: 'Unassigned',
       };
     }

@@ -93,57 +93,10 @@ class JiraService {
 
   /**
    * Create a new Jira ticket from test failure
+   * DISABLED: Read-only mode - ticket creation not allowed
    */
   async createDefectFromFailure(scenarioId) {
-    try {
-      if (!this.jiraHost || !this.jiraToken) {
-        throw new Error('Jira configuration not found');
-      }
-
-      // Get scenario and analysis details
-      const result = await db.query(
-        `SELECT s.*, f.feature_name, te.environment, te.build_number, te.git_commit,
-                fa.root_cause, fa.ai_summary, fa.failure_type
-         FROM scenarios s
-         JOIN features f ON s.feature_id = f.id
-         JOIN test_executions te ON f.execution_id = te.id
-         LEFT JOIN failure_analysis fa ON s.id = fa.scenario_id
-         WHERE s.id = $1`,
-        [scenarioId]
-      );
-
-      if (result.rows.length === 0) {
-        throw new Error('Scenario not found');
-      }
-
-      const scenario = result.rows[0];
-
-      // Create Jira issue
-      const issueData = {
-        fields: {
-          project: {
-            key: this.projectKey,
-          },
-          summary: `Test Failure: ${scenario.scenario_name}`,
-          description: this.buildJiraDescription(scenario),
-          issuetype: {
-            name: 'Bug',
-          },
-          priority: {
-            name: this.determinePriority(scenario),
-          },
-          labels: ['automated-test', 'test-failure', scenario.failure_type || 'unknown'],
-        },
-      };
-
-      const response = await this.client.post('/issue', issueData);
-      
-      console.log(`Created Jira ticket: ${response.data.key}`);
-      return response.data;
-    } catch (error) {
-      console.error('Error creating Jira defect:', error.message);
-      throw error;
-    }
+    throw new Error('Jira ticket creation is disabled. System is in read-only mode.');
   }
 
   /**

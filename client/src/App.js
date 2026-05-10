@@ -11,6 +11,7 @@ import Analytics from './pages/Analytics';
 import Executions from './pages/Executions';
 import ExecutionDetails from './pages/ExecutionDetails';
 import FlakyTests from './pages/FlakyTests';
+import TestCycles from './pages/TestCycles';
 
 const theme = createTheme({
   palette: {
@@ -60,6 +61,7 @@ function App() {
               <Route path="/executions" element={<Executions />} />
               <Route path="/executions/:id" element={<ExecutionDetails />} />
               <Route path="/flaky-tests" element={<FlakyTests />} />
+              <Route path="/test-cycles" element={<TestCycles />} />
             </Routes>
           </Box>
         </Box>

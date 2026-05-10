@@ -16,6 +16,43 @@ pool.on('error', (err) => {
   console.error('Unexpected error on idle client', err);
   process.exit(-1);
 });
+// Drop all tables (use with caution!)
+const dropDatabase = async () => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    console.log('Dropping all tables...');
+    
+    await client.query(`
+      DROP TABLE IF EXISTS steps CASCADE;
+      DROP TABLE IF EXISTS failure_analysis CASCADE;
+      DROP TABLE IF EXISTS scenarios CASCADE;
+      DROP TABLE IF EXISTS features CASCADE;
+      DROP TABLE IF EXISTS test_executions CASCADE;
+      DROP TABLE IF EXISTS jira_defects CASCADE;
+      DROP TABLE IF EXISTS flaky_tests CASCADE;
+    `);
+
+    await client.query('COMMIT');
+    console.log('All tables dropped successfully');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error dropping tables:', error);
+    throw error;
+  } finally {
+    client.release();
+  }
+};
+
+// Reset database (drop and recreate all tables)
+const resetDatabase = async () => {
+  console.log('Resetting database...');
+  await dropDatabase();
+  await initializeDatabase();
+  console.log('Database reset complete');
+};
+
 
 // Database schema initialization
 const initializeDatabase = async () => {
@@ -28,10 +65,12 @@ const initializeDatabase = async () => {
       CREATE TABLE IF NOT EXISTS test_executions (
         id SERIAL PRIMARY KEY,
         build_number VARCHAR(100) NOT NULL,
+        cycle_name VARCHAR(50),
         build_url TEXT,
         environment VARCHAR(50) NOT NULL,
         git_commit VARCHAR(100),
         git_branch VARCHAR(100),
+        triggered_by VARCHAR(100),
         execution_date TIMESTAMP NOT NULL DEFAULT NOW(),
         total_scenarios INTEGER NOT NULL,
         passed_scenarios INTEGER NOT NULL,
@@ -40,7 +79,8 @@ const initializeDatabase = async () => {
         total_duration INTEGER,
         status VARCHAR(20) NOT NULL,
         metadata JSONB,
-        created_at TIMESTAMP DEFAULT NOW()
+        created_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(cycle_name, environment)
       )
     `);
 
@@ -168,6 +208,8 @@ const initializeDatabase = async () => {
 module.exports = {
   pool,
   initializeDatabase,
+  dropDatabase,
+  resetDatabase,
   query: (text, params) => pool.query(text, params),
 };
 

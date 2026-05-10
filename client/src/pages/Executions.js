@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Box,
@@ -14,30 +14,60 @@ import {
   CircularProgress,
   IconButton,
   Tooltip,
+  TextField,
+  InputAdornment,
 } from '@mui/material';
-import { Visibility as ViewIcon } from '@mui/icons-material';
+import { Visibility as ViewIcon, Search as SearchIcon, Clear as ClearIcon } from '@mui/icons-material';
 import axios from 'axios';
 import { format, parseISO } from 'date-fns';
 
 const Executions = () => {
   const [executions, setExecutions] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [searching, setSearching] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
     fetchExecutions();
   }, []);
 
-  const fetchExecutions = async () => {
+  const fetchExecutions = async (cycleName = '') => {
     try {
       setLoading(true);
-      const response = await axios.get('/api/executions', { params: { limit: 50 } });
+      const params = { limit: 50 };
+      if (cycleName) {
+        params.cycleName = cycleName;
+      }
+      const response = await axios.get('/api/executions', { params });
       setExecutions(response.data.executions);
     } catch (error) {
       console.error('Error fetching executions:', error);
     } finally {
       setLoading(false);
+      setSearching(false);
     }
+  };
+
+  // Debounced search function
+  const debounceTimeout = React.useRef(null);
+  const handleSearch = useCallback((value) => {
+    setSearchTerm(value);
+    setSearching(true);
+    
+    if (debounceTimeout.current) {
+      clearTimeout(debounceTimeout.current);
+    }
+    
+    debounceTimeout.current = setTimeout(() => {
+      fetchExecutions(value);
+    }, 500); // 500ms delay
+  }, []);
+
+  const handleClearSearch = () => {
+    setSearchTerm('');
+    setSearching(false);
+    fetchExecutions('');
   };
 
   const handleViewDetails = (executionId) => {
@@ -61,12 +91,52 @@ const Executions = () => {
         Complete history of test execution runs
       </Typography>
 
+      {/* Search Box */}
+      <Paper sx={{ p: 2, mb: 3 }}>
+        <TextField
+          fullWidth
+          placeholder="Search by cycle name..."
+          value={searchTerm}
+          onChange={(e) => handleSearch(e.target.value)}
+          InputProps={{
+            startAdornment: (
+              <InputAdornment position="start">
+                <SearchIcon color="action" />
+              </InputAdornment>
+            ),
+            endAdornment: searchTerm && (
+              <InputAdornment position="end">
+                <IconButton size="small" onClick={handleClearSearch}>
+                  <ClearIcon />
+                </IconButton>
+              </InputAdornment>
+            ),
+          }}
+          disabled={loading}
+        />
+        {searching && (
+          <Box display="flex" alignItems="center" gap={1} mt={1}>
+            <CircularProgress size={16} />
+            <Typography variant="caption" color="text.secondary">
+              Searching...
+            </Typography>
+          </Box>
+        )}
+        {!searching && searchTerm && (
+          <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+            Found {executions.length} execution(s) matching "{searchTerm}"
+          </Typography>
+        )}
+      </Paper>
+
       <TableContainer component={Paper}>
         <Table>
           <TableHead>
             <TableRow sx={{ bgcolor: 'grey.100' }}>
               <TableCell><strong>Build Number</strong></TableCell>
+              <TableCell><strong>Cycle Name</strong></TableCell>
               <TableCell><strong>Environment</strong></TableCell>
+              <TableCell><strong>Triggered By</strong></TableCell>
               <TableCell><strong>Date</strong></TableCell>
               <TableCell align="center"><strong>Total</strong></TableCell>
               <TableCell align="center"><strong>Passed</strong></TableCell>
@@ -81,7 +151,7 @@ const Executions = () => {
           <TableBody>
             {executions.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={11} align="center">
+                <TableCell colSpan={13} align="center">
                   <Typography variant="body2" color="text.secondary" sx={{ py: 3 }}>
                     No executions found
                   </Typography>
@@ -103,7 +173,29 @@ const Executions = () => {
                   >
                     <TableCell>{execution.build_number}</TableCell>
                     <TableCell>
+                      {execution.cycle_name ? (
+                        <Chip
+                          label={execution.cycle_name}
+                          size="small"
+                          color="secondary"
+                          variant="outlined"
+                          icon={<span>🔄</span>}
+                        />
+                      ) : (
+                        <Typography variant="body2" color="text.secondary">-</Typography>
+                      )}
+                    </TableCell>
+                    <TableCell>
                       <Chip label={execution.environment} size="small" color="primary" variant="outlined" />
+                    </TableCell>
+                    <TableCell>
+                      <Chip
+                        label={execution.triggered_by || 'Unknown'}
+                        size="small"
+                        color="default"
+                        variant="outlined"
+                        icon={<span>👤</span>}
+                      />
                     </TableCell>
                     <TableCell>
                       {format(parseISO(execution.execution_date), 'MMM dd, yyyy HH:mm')}

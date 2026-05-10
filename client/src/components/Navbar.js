@@ -14,6 +14,7 @@ import {
   TrendingUp as AnalyticsIcon,
   List as ListIcon,
   BugReport as BugIcon,
+  Loop as CycleIcon,
 } from '@mui/icons-material';
 
 const Navbar = () => {
@@ -24,6 +25,7 @@ const Navbar = () => {
     { path: '/heatmap', label: 'Heatmap', icon: <HeatmapIcon /> },
     { path: '/analytics', label: 'Analytics', icon: <AnalyticsIcon /> },
     { path: '/executions', label: 'Executions', icon: <ListIcon /> },
+    { path: '/test-cycles', label: 'Test Cycles', icon: <CycleIcon /> },
     { path: '/flaky-tests', label: 'Flaky Tests', icon: <BugIcon /> },
   ];
 

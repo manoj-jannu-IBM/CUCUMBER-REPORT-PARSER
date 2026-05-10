@@ -8,7 +8,16 @@ async function generateSampleData() {
 
   try {
     // Sample environments
-    const environments = ['staging', 'production', 'qa', 'dev'];
+    const environments = ['Preprod', 'Prod', 'Stage', 'Dev'];
+    
+    // Sample cycle names
+    const cycleNames = [
+      'Sprint-24.1', 'Sprint-24.2', 'Sprint-24.3', 'Sprint-24.4',
+      'Release-2024.Q1', 'Release-2024.Q2',
+      'Hotfix-123', 'Hotfix-456',
+      'Regression-Suite', 'Smoke-Tests',
+      'Daily-Run', 'Nightly-Build'
+    ];
     
     // Sample features
     const features = [
@@ -50,6 +59,9 @@ async function generateSampleData() {
       for (let exec = 0; exec < executionsPerDay; exec++) {
         const environment = environments[Math.floor(Math.random() * environments.length)];
         const buildNumber = `BUILD-${1000 + day * 10 + exec}`;
+        // Make cycle name unique by appending day and exec to avoid constraint violations
+        const baseCycleName = cycleNames[Math.floor(Math.random() * cycleNames.length)];
+        const cycleName = `${baseCycleName}-${day}-${exec}`;
         
         // Calculate pass rate (higher for recent builds, some variation)
         const basePassRate = 0.85 + (day / daysToGenerate) * 0.1;
@@ -63,18 +75,20 @@ async function generateSampleData() {
 
         // Insert execution
         const executionResult = await db.query(
-          `INSERT INTO test_executions 
-           (build_number, build_url, environment, git_commit, git_branch, 
-            execution_date, total_scenarios, passed_scenarios, failed_scenarios, 
+          `INSERT INTO test_executions
+           (build_number, cycle_name, build_url, environment, git_commit, git_branch, triggered_by,
+            execution_date, total_scenarios, passed_scenarios, failed_scenarios,
             skipped_scenarios, total_duration, status, metadata)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
            RETURNING *`,
           [
             buildNumber,
+            cycleName,
             `https://jenkins.example.com/job/test/${buildNumber}`,
             environment,
             generateGitCommit(),
             'main',
+            ['Jenkins', 'GitHub Actions', 'Manual'][Math.floor(Math.random() * 3)],
             executionDate,
             totalScenarios,
             passedScenarios,
@@ -186,7 +200,7 @@ async function generateSampleData() {
           }
         }
 
-        console.log(`Generated execution ${buildNumber} for ${environment} on ${executionDate.toISOString().split('T')[0]}`);
+        console.log(`Generated execution ${buildNumber} (${cycleName}) for ${environment} on ${executionDate.toISOString().split('T')[0]}`);
       }
     }
 

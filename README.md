@@ -179,7 +179,7 @@ post {
                 requestBody: groovy.json.JsonOutput.toJson([
                     buildNumber: env.BUILD_NUMBER,
                     buildUrl: env.BUILD_URL,
-                    environment: 'staging',
+                    environment: 'Preprod',
                     gitCommit: env.GIT_COMMIT,
                     gitBranch: env.GIT_BRANCH,
                     cucumberReport: cucumberReport,

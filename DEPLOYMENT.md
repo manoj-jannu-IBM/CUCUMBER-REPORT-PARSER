@@ -407,7 +407,7 @@ doctl apps create --spec app.yaml
 - [ ] Set up automated testing
 - [ ] Configure deployment pipeline
 - [ ] Implement blue-green deployment
-- [ ] Set up staging environment
+- [ ] Set up Preprod environment
 - [ ] Automate database migrations
 
 ### Environment Variables (Production)
