@@ -1,69 +1,64 @@
-# Multi-stage build for Test Analytics Platform
+# Dockerfile for Test Analytics Platform
+# Runs both frontend (React dev server) and backend (Node.js) simultaneously
 
-# Stage 1: Build React frontend
-FROM node:18-alpine AS frontend-build
+FROM node:18-alpine
 
-WORKDIR /app/client
-
-# Copy client package files
-COPY client/package*.json ./
-
-# Install client dependencies
-RUN npm ci --only=production
-
-# Copy client source
-COPY client/ ./
-
-# Build React app
-RUN npm run build
-
-# Stage 2: Build Node.js backend
-FROM node:18-alpine AS backend-build
-
+# Set working directory
 WORKDIR /app
 
-# Copy backend package files
+# Install system dependencies
+RUN apk add --no-cache \
+    curl \
+    python3 \
+    make \
+    g++ \
+    bash
+
+# Copy package files for backend
 COPY package*.json ./
 
 # Install backend dependencies
-RUN npm ci --only=production
+RUN npm install
 
-# Stage 3: Final production image
-FROM node:18-alpine
+# Copy package files for frontend
+COPY client/package*.json ./client/
 
+# Install frontend dependencies
+WORKDIR /app/client
+RUN npm install
+
+# Go back to app root
 WORKDIR /app
 
-# Install curl for healthcheck
-RUN apk add --no-cache curl
-
-# Copy backend dependencies
-COPY --from=backend-build /app/node_modules ./node_modules
-
-# Copy backend source
+# Copy all source files
 COPY server/ ./server/
-COPY package*.json ./
+COPY client/ ./client/
 COPY *.js ./
-COPY *.md ./
 COPY *.sql ./
+COPY *.md ./
+COPY start.sh ./
 
-# Copy built frontend
-COPY --from=frontend-build /app/client/build ./client/build
+# Make start script executable
+RUN chmod +x start.sh
 
-# Create non-root user
+# Create non-root user for security
 RUN addgroup -g 1001 -S nodejs && \
     adduser -S nodejs -u 1001 && \
     chown -R nodejs:nodejs /app
 
+# Switch to non-root user
 USER nodejs
 
-# Expose port
-EXPOSE 5000
+# Expose ports
+# 3000 for React development server
+# 5000 for Node.js backend server
+EXPOSE 3000 5000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+# Health check for backend
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
   CMD curl -f http://localhost:5000/api/health || exit 1
 
-# Start application
-CMD ["node", "server/index.js"]
+# Start both frontend and backend servers
+CMD ["./start.sh"]
 
 # Made with Bob
