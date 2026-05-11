@@ -496,51 +496,6 @@ app.post('/api/analysis/:scenarioId/reanalyze', async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 });
-// ==================== EXTERNAL API ENDPOINTS ====================
-
-/**
- * GET /api/external/test-cycles - Proxy endpoint for external test cycles API
- */
-app.get('/api/external/test-cycles', async (req, res) => {
-  try {
-    // Replace with your actual external API URL
-    const externalApiUrl = process.env.EXTERNAL_API_URL || 'https://your-external-api.com/api/test-cycles';
-    
-    // You can add authentication headers if needed
-    const headers = {};
-    if (process.env.EXTERNAL_API_KEY) {
-      headers['Authorization'] = `Bearer ${process.env.EXTERNAL_API_KEY}`;
-    }
-    
-    // Make request to external API
-    const axios = require('axios');
-    const response = await axios.get(externalApiUrl, { headers });
-    
-    // Return the data
-    res.json(response.data);
-  } catch (error) {
-    console.error('Error fetching external test cycles:', error.message);
-    
-    // For development/testing, return mock data if external API fails
-    if (process.env.NODE_ENV === 'development') {
-      console.log('Returning mock data for development');
-      res.json({
-        status: 'SUCCESS',
-        message: 'Mock data for development',
-        getMyCloudTaskOutput: {
-          results: []
-        }
-      });
-    } else {
-      res.status(500).json({ 
-        success: false, 
-        error: 'Failed to fetch test cycles from external API',
-        details: error.message 
-      });
-    }
-  }
-});
-
 
 // ==================== JIRA ENDPOINTS ====================
 

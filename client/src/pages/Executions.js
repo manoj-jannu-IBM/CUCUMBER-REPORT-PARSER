@@ -16,8 +16,13 @@ import {
   Tooltip,
   TextField,
   InputAdornment,
+  TableSortLabel,
 } from '@mui/material';
-import { Visibility as ViewIcon, Search as SearchIcon, Clear as ClearIcon } from '@mui/icons-material';
+import {
+  Visibility as ViewIcon,
+  Search as SearchIcon,
+  Clear as ClearIcon,
+} from '@mui/icons-material';
 import axios from 'axios';
 import { format, parseISO } from 'date-fns';
 
@@ -26,6 +31,8 @@ const Executions = () => {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [searching, setSearching] = useState(false);
+  const [orderBy, setOrderBy] = useState('execution_date');
+  const [order, setOrder] = useState('desc');
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -73,6 +80,53 @@ const Executions = () => {
   const handleViewDetails = (executionId) => {
     navigate(`/executions/${executionId}`);
   };
+
+  const handleSort = (property) => {
+    const isAsc = orderBy === property && order === 'asc';
+    setOrder(isAsc ? 'desc' : 'asc');
+    setOrderBy(property);
+  };
+
+  const sortedExecutions = React.useMemo(() => {
+    const comparator = (a, b) => {
+      let aValue = a[orderBy];
+      let bValue = b[orderBy];
+
+      // Handle null/undefined values
+      if (aValue == null) aValue = '';
+      if (bValue == null) bValue = '';
+
+      // Handle numeric comparisons
+      if (orderBy === 'total_scenarios' || orderBy === 'passed_scenarios' ||
+          orderBy === 'failed_scenarios' || orderBy === 'skipped_scenarios' ||
+          orderBy === 'total_duration') {
+        aValue = Number(aValue) || 0;
+        bValue = Number(bValue) || 0;
+      }
+
+      // Handle date comparisons
+      if (orderBy === 'execution_date') {
+        aValue = new Date(aValue).getTime();
+        bValue = new Date(bValue).getTime();
+      }
+
+      // Handle pass rate calculation
+      if (orderBy === 'pass_rate') {
+        aValue = (a.passed_scenarios / a.total_scenarios) || 0;
+        bValue = (b.passed_scenarios / b.total_scenarios) || 0;
+      }
+
+      if (bValue < aValue) {
+        return order === 'asc' ? 1 : -1;
+      }
+      if (bValue > aValue) {
+        return order === 'asc' ? -1 : 1;
+      }
+      return 0;
+    };
+
+    return [...executions].sort(comparator);
+  }, [executions, order, orderBy]);
 
   if (loading) {
     return (
@@ -133,18 +187,114 @@ const Executions = () => {
         <Table>
           <TableHead>
             <TableRow sx={{ bgcolor: 'grey.100' }}>
-              <TableCell><strong>Build Number</strong></TableCell>
-              <TableCell><strong>Cycle Name</strong></TableCell>
-              <TableCell><strong>Environment</strong></TableCell>
-              <TableCell><strong>Triggered By</strong></TableCell>
-              <TableCell><strong>Date</strong></TableCell>
-              <TableCell align="center"><strong>Total</strong></TableCell>
-              <TableCell align="center"><strong>Passed</strong></TableCell>
-              <TableCell align="center"><strong>Failed</strong></TableCell>
-              <TableCell align="center"><strong>Skipped</strong></TableCell>
-              <TableCell align="center"><strong>Pass Rate</strong></TableCell>
-              <TableCell align="center"><strong>Duration</strong></TableCell>
-              <TableCell align="center"><strong>Status</strong></TableCell>
+              <TableCell>
+                <TableSortLabel
+                  active={orderBy === 'build_number'}
+                  direction={orderBy === 'build_number' ? order : 'asc'}
+                  onClick={() => handleSort('build_number')}
+                >
+                  <strong>Build Number</strong>
+                </TableSortLabel>
+              </TableCell>
+              <TableCell>
+                <TableSortLabel
+                  active={orderBy === 'cycle_name'}
+                  direction={orderBy === 'cycle_name' ? order : 'asc'}
+                  onClick={() => handleSort('cycle_name')}
+                >
+                  <strong>Cycle Name</strong>
+                </TableSortLabel>
+              </TableCell>
+              <TableCell>
+                <TableSortLabel
+                  active={orderBy === 'environment'}
+                  direction={orderBy === 'environment' ? order : 'asc'}
+                  onClick={() => handleSort('environment')}
+                >
+                  <strong>Environment</strong>
+                </TableSortLabel>
+              </TableCell>
+              <TableCell>
+                <TableSortLabel
+                  active={orderBy === 'triggered_by'}
+                  direction={orderBy === 'triggered_by' ? order : 'asc'}
+                  onClick={() => handleSort('triggered_by')}
+                >
+                  <strong>Triggered By</strong>
+                </TableSortLabel>
+              </TableCell>
+              <TableCell>
+                <TableSortLabel
+                  active={orderBy === 'execution_date'}
+                  direction={orderBy === 'execution_date' ? order : 'asc'}
+                  onClick={() => handleSort('execution_date')}
+                >
+                  <strong>Date</strong>
+                </TableSortLabel>
+              </TableCell>
+              <TableCell align="center">
+                <TableSortLabel
+                  active={orderBy === 'total_scenarios'}
+                  direction={orderBy === 'total_scenarios' ? order : 'asc'}
+                  onClick={() => handleSort('total_scenarios')}
+                >
+                  <strong>Total</strong>
+                </TableSortLabel>
+              </TableCell>
+              <TableCell align="center">
+                <TableSortLabel
+                  active={orderBy === 'passed_scenarios'}
+                  direction={orderBy === 'passed_scenarios' ? order : 'asc'}
+                  onClick={() => handleSort('passed_scenarios')}
+                >
+                  <strong>Passed</strong>
+                </TableSortLabel>
+              </TableCell>
+              <TableCell align="center">
+                <TableSortLabel
+                  active={orderBy === 'failed_scenarios'}
+                  direction={orderBy === 'failed_scenarios' ? order : 'asc'}
+                  onClick={() => handleSort('failed_scenarios')}
+                >
+                  <strong>Failed</strong>
+                </TableSortLabel>
+              </TableCell>
+              <TableCell align="center">
+                <TableSortLabel
+                  active={orderBy === 'skipped_scenarios'}
+                  direction={orderBy === 'skipped_scenarios' ? order : 'asc'}
+                  onClick={() => handleSort('skipped_scenarios')}
+                >
+                  <strong>Skipped</strong>
+                </TableSortLabel>
+              </TableCell>
+              <TableCell align="center">
+                <TableSortLabel
+                  active={orderBy === 'pass_rate'}
+                  direction={orderBy === 'pass_rate' ? order : 'asc'}
+                  onClick={() => handleSort('pass_rate')}
+                >
+                  <strong>Pass Rate</strong>
+                </TableSortLabel>
+              </TableCell>
+              <TableCell align="center">
+                <TableSortLabel
+                  active={orderBy === 'total_duration'}
+                  direction={orderBy === 'total_duration' ? order : 'asc'}
+                  onClick={() => handleSort('total_duration')}
+                >
+                  <strong>Duration</strong>
+                </TableSortLabel>
+              </TableCell>
+              <TableCell align="center">
+                <TableSortLabel
+                  active={orderBy === 'status'}
+                  direction={orderBy === 'status' ? order : 'asc'}
+                  onClick={() => handleSort('status')}
+                >
+                  <strong>Status</strong>
+                </TableSortLabel>
+              </TableCell>
               <TableCell align="center"><strong>Actions</strong></TableCell>
             </TableRow>
           </TableHead>
@@ -158,7 +308,7 @@ const Executions = () => {
                 </TableCell>
               </TableRow>
             ) : (
-              executions.map((execution) => {
+              sortedExecutions.map((execution) => {
                 const passRate = (execution.passed_scenarios / execution.total_scenarios * 100).toFixed(1);
                 const duration = execution.total_duration
                   ? `${Math.floor(execution.total_duration / 60000)}m ${Math.floor((execution.total_duration % 60000) / 1000)}s`
