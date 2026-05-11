@@ -17,15 +17,19 @@ RUN apk add --no-cache \
 # Copy package files for backend
 COPY package*.json ./
 
-# Install backend dependencies
-RUN npm install
+# Clean npm cache and install backend dependencies
+RUN npm cache clean --force && \
+    npm install --no-optional --legacy-peer-deps && \
+    npm rebuild
 
 # Copy package files for frontend
 COPY client/package*.json ./client/
 
 # Install frontend dependencies
 WORKDIR /app/client
-RUN npm install
+RUN npm cache clean --force && \
+    npm install --no-optional --legacy-peer-deps && \
+    npm rebuild
 
 # Go back to app root
 WORKDIR /app
